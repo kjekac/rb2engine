@@ -12,6 +12,7 @@ import bisect
 import dataclasses
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 from rb2engine.ir import CueKind, SourceBeat, SourceCue, SourceLibrary, SourceTrack
 from rb2engine.playlist_naming import format_path, resolve_paths
@@ -53,6 +54,7 @@ class PreludeConfig:
 @dataclass(frozen=True, slots=True)
 class PreludeIssue:
     track_id: int
+    artist: str
     title: str
     source_slot: int
     reason: str
@@ -69,7 +71,7 @@ class PreludeSummary:
     preludes_truncated: int = 0
     issues: list[PreludeIssue] = field(default_factory=list)
 
-    def to_json_obj(self) -> dict[str, object]:
+    def to_json_obj(self) -> dict[str, Any]:
         return {
             "bars": self.config.bars,
             "minimum_gap_bars": self.config.minimum_gap_bars,
@@ -341,6 +343,7 @@ def _issue(
     summary.issues.append(
         PreludeIssue(
             track_id=track.rb_id,
+            artist=track.artist,
             title=track.title,
             source_slot=source_slot,
             reason=reason,

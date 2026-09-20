@@ -114,6 +114,8 @@ Every conversion writes:
 `--no-artwork` skips reading embedded artwork and makes conversion faster.
 `inspect --json` exposes the parsed Rekordbox library. `doctor` and `inspect`
 are read-only; `verify` reads both sides; only `convert` writes.
+Dry runs print every prelude issue with the artist, title, source pad, track ID,
+and reason. Completed conversions retain the same list in the JSON report.
 
 Exit status is `0` for success, `1` for a completed operation with discrepancies
 or skipped tracks, and `2` for a fatal error.

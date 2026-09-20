@@ -388,6 +388,7 @@ class ConversionReport:
                     f"  issues: {len(self.prelude['issues'])}",
                 ]
             )
+            lines.extend(render_prelude_issue_lines(self.prelude))
         if self.fatal:
             lines.append(f"FATAL: {self.fatal_message}")
         if self.skipped_tracks:
@@ -428,6 +429,25 @@ class ConversionReport:
             Console().print(text, end="")
         except (OSError, TypeError, ValueError):
             print(text, end="")
+
+
+def render_prelude_issue_lines(prelude: dict[str, Any]) -> list[str]:
+    """Render the per-cue problems retained in a prelude summary."""
+    issues = prelude.get("issues", [])
+    if not issues:
+        return []
+
+    lines = ["", "Prelude issues:"]
+    for issue in issues:
+        slot = int(issue["source_slot"])
+        pad = chr(ord("A") + slot - 1)
+        artist = str(issue.get("artist", "")).strip()
+        title = str(issue.get("title", "")).strip()
+        track = " — ".join(part for part in (artist, title) if part)
+        lines.append(
+            f"  pad {pad}: {track} (track {issue['track_id']}): {issue['reason']}"
+        )
+    return lines
 
 
 def exit_code_for(report: ConversionReport) -> int:

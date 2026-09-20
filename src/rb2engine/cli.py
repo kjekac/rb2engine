@@ -301,7 +301,7 @@ def convert_cmd(
     # the parser/writer stack.
     import rb2engine.reader.library as reader_library
     from rb2engine.progress import ProgressReporter
-    from rb2engine.report import ConversionReport
+    from rb2engine.report import ConversionReport, render_prelude_issue_lines
     from rb2engine.writer.build import build_library
 
     schema: tuple[int, int, int] | None = None
@@ -365,6 +365,9 @@ def convert_cmd(
                     f"{len(report.prelude['issues'])} issues"
                 )
             click.echo(message)
+            if report.prelude is not None:
+                for line in render_prelude_issue_lines(report.prelude):
+                    click.echo(line)
             ctx.exit(0)
 
         m_db = build_library(

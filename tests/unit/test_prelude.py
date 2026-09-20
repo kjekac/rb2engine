@@ -17,7 +17,11 @@ from rb2engine.ir import (
     SourceTrack,
 )
 from rb2engine.prelude import PreludeConfig, transform_library
-from rb2engine.report import JOURNAL_FILENAME, REPORT_FILENAME
+from rb2engine.report import (
+    JOURNAL_FILENAME,
+    REPORT_FILENAME,
+    render_prelude_issue_lines,
+)
 from rb2engine.verify import _load_recorded_prelude_config
 
 
@@ -204,7 +208,13 @@ def test_occupied_destination_is_reported_and_left_unchanged() -> None:
     assert converted.tracks[7] == track
     assert len(summary.issues) == 1
     assert summary.issues[0].source_slot == 1
+    assert summary.issues[0].artist == "Tester"
     assert summary.issues[0].reason == "destination pad E is occupied"
+    assert render_prelude_issue_lines(summary.to_json_obj()) == [
+        "",
+        "Prelude issues:",
+        "  pad A: Tester — Variable Grid (track 7): destination pad E is occupied",
+    ]
 
 
 def test_hot_loop_does_not_block_engine_quick_cue_destination() -> None:

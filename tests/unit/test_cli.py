@@ -184,6 +184,37 @@ def test_convert_on_non_stick_exits_two(runner: CliRunner, tmp_path: Path) -> No
     assert not (drive / "Engine Library").exists()
 
 
+def test_prelude_dry_run_prints_each_issue(
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    drive = tmp_path / "stick"
+    drive.mkdir()
+    library = _synthetic_library(drive)
+    monkeypatch.setattr(
+        "rb2engine.reader.library.read_library",
+        lambda *_args, **_kwargs: library,
+    )
+
+    result = runner.invoke(
+        main,
+        [
+            "convert",
+            str(drive),
+            "--dry-run",
+            "--no-artwork",
+            "--prelude-bars",
+            "8",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "2 issues" in result.output
+    assert "Prelude issues:" in result.output
+    assert "pad A: A — T (track 1)" in result.output
+    assert "fewer than one full bar is available before the cue" in result.output
+    assert not (drive / "Engine Library").exists()
+
+
 # ---------------------------------------------------------------------------
 # inspect --json on synthetic SourceLibrary
 # ---------------------------------------------------------------------------
