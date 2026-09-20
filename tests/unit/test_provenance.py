@@ -269,6 +269,26 @@ def test_journal_appends_one_line_per_publish(tmp_path: Path) -> None:
     assert entry is not None and entry["m_db_sha256"] == "2" * 64
 
 
+def test_journal_records_optional_prelude_settings(tmp_path: Path) -> None:
+    engine_lib = tmp_path / "Engine Library"
+    engine_lib.mkdir()
+
+    append_journal(
+        engine_lib,
+        _record(),
+        timestamp="t1",
+        prelude_bars=16,
+        prelude_minimum_gap_bars=8,
+        prelude_playlists=("Sets/Prelude",),
+    )
+
+    entry = read_last_journal_entry(engine_lib)
+    assert entry is not None
+    assert entry["prelude_bars"] == 16
+    assert entry["prelude_minimum_gap_bars"] == 8
+    assert entry["prelude_playlists"] == ["Sets/Prelude"]
+
+
 def test_journal_stamps_a_real_timestamp_by_default(tmp_path: Path) -> None:
     """Without an injected timestamp the journal line carries wall-clock UTC.
 

@@ -138,6 +138,7 @@ REPORT_SCHEMA: dict[str, Any] = {
         "path_base": {"type": ["string", "null"]},
         "fatal": {"type": "boolean"},
         "fatal_message": {"type": ["string", "null"]},
+        "prelude": {"type": ["object", "null"]},
         # Optional (not in "required"): reports from < 0.5 have no provenance,
         # and they must keep validating — verify degrades that to a finding.
         "provenance": {
@@ -242,6 +243,9 @@ class ConversionReport:
     path_base: str | None = None
     fatal: bool = False
     fatal_message: str | None = None
+    # Conversion-time Engine-only cue transformation. Kept as JSON-shaped data
+    # so older report readers can ignore it via additionalProperties.
+    prelude: dict[str, Any] | None = None
     # Set by build_library on a successful publish (None when the source had no
     # fingerprint, e.g. libraries not parsed from a pdb, or on fatal runs).
     provenance: ProvenanceRecord | None = None
@@ -322,6 +326,7 @@ class ConversionReport:
             "path_base": self.path_base,
             "fatal": self.fatal,
             "fatal_message": self.fatal_message,
+            "prelude": self.prelude,
             "provenance": (
                 None if self.provenance is None else asdict(self.provenance)
             ),
@@ -359,6 +364,30 @@ class ConversionReport:
         ]
         if self.path_base is not None:
             lines.append(f"path_base:         {self.path_base}")
+        if self.prelude is not None:
+            lines.extend(
+                [
+                    "",
+                    "Prelude cues:",
+                    f"  lead: {self.prelude['bars']} bars",
+                    "  minimum gap: "
+                    f"{self.prelude['minimum_gap_bars']} bars",
+                    "  scope: "
+                    + (
+                        ", ".join(self.prelude["playlists"])
+                        if self.prelude["playlists"]
+                        else "all tracks"
+                    ),
+                    f"  tracks selected: {self.prelude['tracks_selected']}",
+                    f"  tracks changed: {self.prelude['tracks_changed']}",
+                    f"  anchors moved: {self.prelude['anchors_moved']}",
+                    f"  preludes created: {self.prelude['preludes_created']}",
+                    "  preludes consolidated: "
+                    f"{self.prelude['preludes_consolidated']}",
+                    f"  start-limited: {self.prelude['preludes_truncated']}",
+                    f"  issues: {len(self.prelude['issues'])}",
+                ]
+            )
         if self.fatal:
             lines.append(f"FATAL: {self.fatal_message}")
         if self.skipped_tracks:
@@ -439,6 +468,9 @@ def append_journal(
     record: ProvenanceRecord,
     *,
     timestamp: str | None = None,
+    prelude_bars: int | None = None,
+    prelude_minimum_gap_bars: int | None = None,
+    prelude_playlists: tuple[str, ...] | None = None,
 ) -> Path:
     """Append one publish line to ``Engine Library/rb2engine-journal.jsonl``.
 
@@ -457,12 +489,12 @@ def append_journal(
     path = engine_lib / JOURNAL_FILENAME
     if timestamp is None:
         timestamp = datetime.now(UTC).isoformat(timespec="seconds")
-    line = (
-        json.dumps(
-            {"timestamp": timestamp, **asdict(record)}, ensure_ascii=False
-        )
-        + "\n"
-    )
+    obj: dict[str, Any] = {"timestamp": timestamp, **asdict(record)}
+    if prelude_bars is not None:
+        obj["prelude_bars"] = prelude_bars
+        obj["prelude_minimum_gap_bars"] = prelude_minimum_gap_bars
+        obj["prelude_playlists"] = list(prelude_playlists or ())
+    line = json.dumps(obj, ensure_ascii=False) + "\n"
 
     existing = b""
     if path.exists():

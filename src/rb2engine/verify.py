@@ -23,6 +23,7 @@ from rb2engine.ir_engine import artwork_content_hash
 from rb2engine.mapper.track import map_track
 from rb2engine.playlist_check import CHAIN, compare_playlists, db_playlist_paths
 from rb2engine.playlist_naming import format_path, resolve_paths
+from rb2engine.prelude import PreludeConfig, transform_library
 from rb2engine.reader.library import read_library
 from rb2engine.report import (
     JOURNAL_FILENAME,
@@ -227,6 +228,7 @@ def verify_library(
     *,
     with_artwork: bool = True,
     sample: int | None = None,
+    prelude_config: PreludeConfig | None = None,
 ) -> VerifyResult:
     """Decode written m.db and diff against a fresh parse of the source stick.
 
@@ -259,6 +261,10 @@ def verify_library(
 
     source = read_library(drive_root, with_anlz=True, with_artwork=with_artwork)
     engine_lib = drive_root / ENGINE_LIBRARY_DIRNAME
+    if prelude_config is None:
+        prelude_config = _load_recorded_prelude_config(engine_lib)
+    if prelude_config is not None:
+        source, _ = transform_library(source, prelude_config)
 
     # Hash the m.db BEFORE decoding it: this is the "which oracle moved"
     # question, and it must be answered against the same bytes we then verify.
@@ -290,6 +296,55 @@ def verify_library(
         db_changed=db_changed,
         provenance_missing=missing,
     )
+
+
+def _load_recorded_prelude_config(engine_lib: Path) -> PreludeConfig | None:
+    """Recover the cue transform used for the most recent conversion.
+
+    The append-only journal is authoritative.  The report is a fallback for a
+    conversion whose journal could not be written or an older prelude build.
+    """
+    try:
+        entry = read_last_journal_entry(engine_lib)
+    except (OSError, ValueError):
+        entry = None
+    if isinstance(entry, dict):
+        bars = entry.get("prelude_bars")
+        gap = entry.get("prelude_minimum_gap_bars")
+        playlists = entry.get("prelude_playlists", [])
+        if isinstance(bars, int) and bars > 0:
+            return PreludeConfig(
+                bars=bars,
+                minimum_gap_bars=gap if isinstance(gap, int) and gap >= 0 else 8,
+                playlists=_playlist_selectors(playlists),
+            )
+
+    report_path = engine_lib / REPORT_FILENAME
+    if not report_path.is_file():
+        return None
+    try:
+        obj = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    prelude = obj.get("prelude") if isinstance(obj, dict) else None
+    if not isinstance(prelude, dict):
+        return None
+    bars = prelude.get("bars")
+    gap = prelude.get("minimum_gap_bars")
+    playlists = prelude.get("playlists", [])
+    if not isinstance(bars, int) or bars <= 0:
+        return None
+    return PreludeConfig(
+        bars=bars,
+        minimum_gap_bars=gap if isinstance(gap, int) and gap >= 0 else 8,
+        playlists=_playlist_selectors(playlists),
+    )
+
+
+def _playlist_selectors(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        return ()
+    return tuple(value)
 
 
 # ---------------------------------------------------------------------------
