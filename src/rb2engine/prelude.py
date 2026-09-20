@@ -191,10 +191,17 @@ def _transform_track(
             continue
 
         anchor_beat = _nearest_beat(track.beatgrid.beats, cue.start_sample)
-        prelude_beat = max(0, anchor_beat - config.lead_beats)
-        if prelude_beat == anchor_beat:
-            _issue(summary, track, source_slot, "cue is on the first available grid beat")
+        available_beats = min(anchor_beat, config.lead_beats)
+        actual_lead_beats = (available_beats // BEATS_PER_BAR) * BEATS_PER_BAR
+        if actual_lead_beats == 0:
+            _issue(
+                summary,
+                track,
+                source_slot,
+                "fewer than one full bar is available before the cue",
+            )
             continue
+        prelude_beat = anchor_beat - actual_lead_beats
         candidates.append(
             _Candidate(
                 cue=cue,
@@ -202,7 +209,7 @@ def _transform_track(
                 destination_slot=destination,
                 anchor_beat=anchor_beat,
                 prelude_beat=prelude_beat,
-                truncated=prelude_beat != anchor_beat - config.lead_beats,
+                truncated=actual_lead_beats != config.lead_beats,
             )
         )
 
@@ -266,7 +273,11 @@ def _consolidate(
     kept: list[_Candidate] = []
     covered: dict[int, list[_Candidate]] = {}
     for candidate in ordered:
-        if kept and candidate.prelude_beat - kept[-1].prelude_beat <= minimum_gap_beats:
+        if (
+            kept
+            and candidate.prelude_beat - kept[-1].prelude_beat <= minimum_gap_beats
+            and (candidate.anchor_beat - kept[-1].prelude_beat) % BEATS_PER_BAR == 0
+        ):
             covered.setdefault(kept[-1].source_slot, []).append(candidate)
         else:
             kept.append(candidate)
@@ -293,8 +304,9 @@ def _prelude_label(
 
 
 def _format_bars(beats: int) -> str:
-    bars = beats / BEATS_PER_BAR
-    return str(int(bars)) if bars.is_integer() else f"{bars:g}"
+    if beats % BEATS_PER_BAR:
+        raise ValueError(f"prelude lead must contain whole bars, got {beats} beats")
+    return str(beats // BEATS_PER_BAR)
 
 
 def _nearest_beat(beats: list[SourceBeat], sample: int) -> int:

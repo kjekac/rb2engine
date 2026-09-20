@@ -27,12 +27,14 @@ The transform:
 - preserves the original anchor's exact sample position, colour, and name;
 - labels generated cues, for example `Prelude → E 16b [prelude:E]`, and labels
   moved anchors with `[anchor:A]`;
-- shortens the runway at the beginning of a track and records the actual lead,
-  for example `Prelude → E 6.5b start-limited [prelude:E]`;
+- shortens the runway at the beginning of a track to the largest available
+  whole-bar lead and records it, for example
+  `Prelude → E 6b start-limited [prelude:E]`;
 - consolidates nearby generated preludes by default. If two would be eight bars
   or less apart, the earlier one covers both anchors and its label names both;
 - leaves a source cue unchanged and reports an issue if its E–H destination is
-  occupied, it lacks a usable beatgrid, or the source pad is ambiguous;
+  occupied, it lacks a usable beatgrid, less than one full bar is available,
+  or the source pad is ambiguous;
 - leaves hot-cue loops and cues already carrying a prelude/anchor marker alone.
 
 The operation is idempotent in the useful sense: each conversion starts with

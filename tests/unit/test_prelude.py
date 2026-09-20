@@ -140,9 +140,19 @@ def test_start_truncation_records_actual_runway() -> None:
     prelude = _slot(converted.tracks[7], 3)
     anchor = _slot(converted.tracks[7], 7)
     assert prelude is not None and anchor is not None
-    assert prelude.start_sample == grid.beats[0].sample_offset
-    assert prelude.name == "Prelude → G 4.5b start-limited [prelude:G]"
+    assert prelude.start_sample == grid.beats[2].sample_offset
+    assert prelude.name == "Prelude → G 4b start-limited [prelude:G]"
     assert summary.preludes_truncated == 1
+
+
+def test_less_than_one_bar_of_runway_is_left_unchanged() -> None:
+    grid = _grid()
+    source = _library(_track(grid, [_cue(2, 3, grid)]))
+    converted, summary = transform_library(source, PreludeConfig(bars=16))
+
+    assert converted == source
+    assert summary.preludes_created == 0
+    assert summary.issues[0].reason == "fewer than one full bar is available before the cue"
 
 
 def test_nearby_preludes_consolidate_to_earlier_launch_point() -> None:
@@ -170,6 +180,19 @@ def test_zero_gap_keeps_both_preludes() -> None:
     )
     assert _slot(converted.tracks[7], 1) is not None
     assert _slot(converted.tracks[7], 3) is not None
+    assert summary.preludes_created == 2
+    assert summary.preludes_consolidated == 0
+
+
+def test_nearby_preludes_on_different_bar_phases_do_not_consolidate() -> None:
+    grid = _grid()
+    cues = [_cue(1, 64, grid), _cue(3, 95, grid)]
+    converted, summary = transform_library(
+        _library(_track(grid, cues)), PreludeConfig(bars=16, minimum_gap_bars=8)
+    )
+
+    assert _slot(converted.tracks[7], 1).name == "Prelude → E 16b [prelude:E]"  # type: ignore[union-attr]
+    assert _slot(converted.tracks[7], 3).name == "Prelude → G 16b [prelude:G]"  # type: ignore[union-attr]
     assert summary.preludes_created == 2
     assert summary.preludes_consolidated == 0
 
