@@ -25,11 +25,10 @@ The transform:
 - counts beats on Rekordbox's dense beatgrid, so tempo changes and variable
   grids work correctly;
 - preserves the original anchor's exact sample position, colour, and name;
-- labels generated cues, for example `Prelude → E 16b [prelude:E]`, and labels
-  moved anchors with `[anchor:A]`;
+- labels generated cues compactly, for example `16b:E` or
+  `16b:E (Drop), 24b:G`, and labels moved anchors with `[anchor:A]`;
 - shortens the runway at the beginning of a track to the largest available
-  whole-bar lead and records it, for example
-  `Prelude → E 6b start-limited [prelude:E]`;
+  whole-bar lead and records it, for example `6b:E`;
 - consolidates nearby generated preludes by default. If two would be eight bars
   or less apart, the earlier one covers both anchors and its label names both;
 - leaves a source cue unchanged and reports an issue if its E–H destination is

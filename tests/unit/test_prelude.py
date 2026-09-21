@@ -6,6 +6,8 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from rb2engine.ir import (
     RGB,
     CueKind,
@@ -111,7 +113,8 @@ def test_variable_grid_moves_by_grid_beats_and_preserves_anchor() -> None:
     anchor = _slot(track, 5)
     assert prelude is not None and anchor is not None
     assert prelude.start_sample == grid.beats[36].sample_offset
-    assert prelude.name == "Prelude → E 16b [prelude:E]"
+    assert prelude.name == "16b:E (Main drop)"
+    prelude.name.encode("latin-1")
     assert anchor.start_sample == grid.beats[100].sample_offset
     assert anchor.name == "Main drop [anchor:A]"
     assert anchor.color == original.cues[0].color
@@ -131,21 +134,21 @@ def test_repeat_is_idempotent_and_new_distance_rebuilds_from_source() -> None:
     assert summary.tracks_changed == 0
     assert _slot(sixteen.tracks[7], 1).start_sample == grid.beats[36].sample_offset  # type: ignore[union-attr]
     assert _slot(thirty_two.tracks[7], 1).start_sample == grid.beats[0].sample_offset  # type: ignore[union-attr]
-    assert "25b start-limited" in (_slot(thirty_two.tracks[7], 1).name or "")  # type: ignore[union-attr]
+    assert _slot(thirty_two.tracks[7], 1).name == "25b:E (Drop)"  # type: ignore[union-attr]
     assert _slot(thirty_two.tracks[7], 5).start_sample == grid.beats[100].sample_offset  # type: ignore[union-attr]
 
 
 def test_start_truncation_records_actual_runway() -> None:
     grid = _grid()
     converted, summary = transform_library(
-        _library(_track(grid, [_cue(3, 18, grid)])), PreludeConfig(bars=16)
+        _library(_track(grid, [_cue(3, 18, grid, "")])), PreludeConfig(bars=16)
     )
 
     prelude = _slot(converted.tracks[7], 3)
     anchor = _slot(converted.tracks[7], 7)
     assert prelude is not None and anchor is not None
     assert prelude.start_sample == grid.beats[2].sample_offset
-    assert prelude.name == "Prelude → G 4b start-limited [prelude:G]"
+    assert prelude.name == "4b:G"
     assert summary.preludes_truncated == 1
 
 
@@ -167,13 +170,33 @@ def test_nearby_preludes_consolidate_to_earlier_launch_point() -> None:
     )
 
     track = converted.tracks[7]
-    assert _slot(track, 1).name == "Prelude → E 16b, G 24b [prelude:E,G]"  # type: ignore[union-attr]
+    assert _slot(track, 1).name == "16b:E (First), 24b:G (Second)"  # type: ignore[union-attr]
     assert _slot(track, 3) is None
     assert _slot(track, 5).name == "First [anchor:A]"  # type: ignore[union-attr]
     assert _slot(track, 7).name == "Second [anchor:C]"  # type: ignore[union-attr]
     assert summary.anchors_moved == 2
     assert summary.preludes_created == 1
     assert summary.preludes_consolidated == 1
+
+
+@pytest.mark.parametrize(
+    ("first_name", "expected"),
+    [
+        ("", "8b:E, 12b:G"),
+        ("Drop", "8b:E (Drop), 12b:G"),
+    ],
+)
+def test_compact_consolidated_labels_include_only_existing_names(
+    first_name: str,
+    expected: str,
+) -> None:
+    grid = _grid()
+    cues = [_cue(1, 64, grid, first_name), _cue(3, 80, grid, "")]
+    converted, _ = transform_library(
+        _library(_track(grid, cues)), PreludeConfig(bars=8, minimum_gap_bars=4)
+    )
+
+    assert _slot(converted.tracks[7], 1).name == expected  # type: ignore[union-attr]
 
 
 def test_zero_gap_keeps_both_preludes() -> None:
@@ -195,8 +218,8 @@ def test_nearby_preludes_on_different_bar_phases_do_not_consolidate() -> None:
         _library(_track(grid, cues)), PreludeConfig(bars=16, minimum_gap_bars=8)
     )
 
-    assert _slot(converted.tracks[7], 1).name == "Prelude → E 16b [prelude:E]"  # type: ignore[union-attr]
-    assert _slot(converted.tracks[7], 3).name == "Prelude → G 16b [prelude:G]"  # type: ignore[union-attr]
+    assert _slot(converted.tracks[7], 1).name == "16b:E (Drop)"  # type: ignore[union-attr]
+    assert _slot(converted.tracks[7], 3).name == "16b:G (Drop)"  # type: ignore[union-attr]
     assert summary.preludes_created == 2
     assert summary.preludes_consolidated == 0
 

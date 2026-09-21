@@ -21,6 +21,9 @@ SOURCE_SLOTS = range(1, 5)
 DESTINATION_OFFSET = 4
 BEATS_PER_BAR = 4
 _MARKER_RE = re.compile(r"\[(?:prelude|anchor):", re.IGNORECASE)
+_COMPACT_PRELUDE_RE = re.compile(
+    r"\d+b:[E-H](?: \([^\r\n]*\))?(?:, \d+b:[E-H](?: \([^\r\n]*\))?)*"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,7 +249,7 @@ def _transform_track(
         candidate = kept_by_slot[source_slot]
         covered = covered_by.get(source_slot, [])
         destinations = [candidate.destination_slot, *(c.destination_slot for c in covered)]
-        label = _prelude_label(candidate.prelude_beat, destinations, candidates, config)
+        label = _prelude_label(candidate.prelude_beat, destinations, candidates)
         transformed.append(
             SourceCue(
                 kind=CueKind.HOT,
@@ -290,19 +293,18 @@ def _prelude_label(
     prelude_beat: int,
     destination_slots: list[int],
     all_candidates: list[_Candidate],
-    config: PreludeConfig,
 ) -> str:
     by_destination = {c.destination_slot: c for c in all_candidates}
     parts: list[str] = []
-    truncated = False
     for destination in destination_slots:
         candidate = by_destination[destination]
         actual_beats = candidate.anchor_beat - prelude_beat
-        parts.append(f"{_pad(destination)} {_format_bars(actual_beats)}b")
-        truncated = truncated or actual_beats < config.lead_beats
-    suffix = " start-limited" if truncated else ""
-    marker = ",".join(_pad(slot) for slot in destination_slots)
-    return f"Prelude → {', '.join(parts)}{suffix} [prelude:{marker}]"
+        part = f"{_format_bars(actual_beats)}b:{_pad(destination)}"
+        original_name = (candidate.cue.name or "").strip()
+        if original_name:
+            part += f" ({original_name})"
+        parts.append(part)
+    return ", ".join(parts)
 
 
 def _format_bars(beats: int) -> str:
@@ -327,7 +329,9 @@ def _append_marker(name: str | None, marker: str) -> str:
 
 
 def _is_marked(name: str | None) -> bool:
-    return bool(name and _MARKER_RE.search(name))
+    if not name:
+        return False
+    return bool(_MARKER_RE.search(name) or _COMPACT_PRELUDE_RE.fullmatch(name.strip()))
 
 
 def _pad(slot: int) -> str:
