@@ -337,7 +337,7 @@ class TestEmptyAndEdgeCases:
         assert _markers(out)[0].beat_number == -4
 
     def test_is_adjusted_still_populates_both_grids(self) -> None:
-        """PQT2 presence flags is_adjusted; without separate PQT2 times both grids match.
+        """A legacy is_adjusted signal still produces two complete Engine grids.
 
         WHY: Engine reads the adjusted grid for playback — it must never be empty
         when a grid exists (write policy).

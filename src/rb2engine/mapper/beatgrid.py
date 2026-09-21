@@ -36,7 +36,8 @@ def compress_beatgrid(
     Parameters
     ----------
     grid:
-        Source beatgrid (PQTZ beats; ``is_adjusted`` from PQT2 presence).
+        Source beatgrid (PQTZ beats, optionally refined by matched PQT2 timing
+        precision).
     sample_rate:
         Track sample rate in Hz (for tempo math / fallbacks).
     total_samples:
@@ -60,7 +61,7 @@ def compress_beatgrid(
     markers = _with_number_of_beats(normalized)
 
     # Writer policy: adjusted grid must never be empty when a grid exists.
-    # Reader only supplies one dense list (PQTZ); is_adjusted is a flag only.
+    # Reader supplies one dense list (PQTZ plus optional PQT2 precision).
     return EngineBeatGrid(
         default_markers=markers,
         adjusted_markers=list(markers),
