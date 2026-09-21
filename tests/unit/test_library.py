@@ -126,6 +126,7 @@ def _patch_orchestration(
     resolve: Any = None,
     read_anlz: Any = None,
     extract_artwork: Any = None,
+    read_mp3_start_skip: Any = None,
 ) -> dict[str, MagicMock]:
     """Wire fakes into reader.library so only the join logic runs."""
     import rb2engine.reader.library as library_mod
@@ -140,12 +141,20 @@ def _patch_orchestration(
     mocks["extract_artwork"] = (
         extract_artwork if extract_artwork is not None else MagicMock(return_value=None)
     )
+    mocks["read_mp3_start_skip"] = (
+        read_mp3_start_skip if read_mp3_start_skip is not None else MagicMock(return_value=0)
+    )
 
     monkeypatch.setattr(library_mod, "scan_drive", mocks["scan_drive"])
     monkeypatch.setattr(library_mod, "parse_export_pdb", mocks["parse_export_pdb"])
     monkeypatch.setattr(library_mod, "resolve_anlz_paths", mocks["resolve_anlz_paths"])
     monkeypatch.setattr(library_mod, "read_anlz", mocks["read_anlz"])
     monkeypatch.setattr(library_mod, "extract_artwork", mocks["extract_artwork"])
+    monkeypatch.setattr(
+        library_mod,
+        "read_mp3_start_skip",
+        mocks["read_mp3_start_skip"],
+    )
     return mocks
 
 
@@ -249,6 +258,53 @@ def test_track_with_analyze_path_gets_beatgrid_and_cues(
 
     assert result.tracks[1].beatgrid == expected_grid
     assert result.tracks[1].cues == expected_cues
+
+
+def test_mp3_encoder_delay_shifts_all_anlz_positions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Engine must receive MP3-frame positions without separating cues from beats."""
+    from rb2engine.reader.library import read_library
+
+    drive = tmp_path / "stick"
+    audio = drive / "Contents" / "delayed.mp3"
+    track = _track(
+        1,
+        analyze_path="/PIONEER/USBANLZ/P0/1/ANLZ0000.DAT",
+        resolved_path=audio,
+    )
+    lib = _base_lib(drive, {1: track})
+    grid = SourceBeatgrid(
+        beats=[SourceBeat(beat_in_bar=1, sample_offset=4_032, bpm=134.0)],
+        is_adjusted=False,
+    )
+    cues = [
+        SourceCue(
+            kind=CueKind.HOT,
+            hot_slot=1,
+            start_sample=4_032,
+            end_sample=8_032,
+            color=None,
+            name="loop",
+        )
+    ]
+
+    _patch_orchestration(
+        monkeypatch,
+        drive=drive,
+        lib=lib,
+        resolve=MagicMock(return_value=AnlzPaths(Path("a.DAT"), None, None)),
+        read_anlz=MagicMock(return_value=(grid, cues, [])),
+        read_mp3_start_skip=MagicMock(return_value=1105),
+    )
+
+    result = read_library(drive, with_artwork=False)
+
+    shifted_grid = result.tracks[1].beatgrid
+    assert shifted_grid is not None
+    assert shifted_grid.beats[0].sample_offset == 2_927
+    assert result.tracks[1].cues[0].start_sample == 2_927
+    assert result.tracks[1].cues[0].end_sample == 6_927
 
 
 def test_track_without_analyze_path_passes_through_without_anlz(

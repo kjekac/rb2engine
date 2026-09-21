@@ -18,10 +18,11 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path
 
-from rb2engine.ir import SourceLibrary, SourceTrack
+from rb2engine.ir import SourceBeatgrid, SourceCue, SourceLibrary, SourceTrack
 from rb2engine.progress import ProgressCallback
 from rb2engine.reader.anlz import read_anlz
 from rb2engine.reader.artwork import extract_artwork
+from rb2engine.reader.mp3 import read_mp3_start_skip
 from rb2engine.reader.pdb import parse_export_pdb
 from rb2engine.reader.scan import resolve_anlz_paths, scan_drive
 
@@ -92,6 +93,12 @@ def read_library(
                         beatgrid, cues, anlz_warnings = read_anlz(
                             paths.dat, paths.ext, track.sample_rate
                         )
+                        if track.file_type == "mp3" and track.resolved_path is not None:
+                            start_skip = read_mp3_start_skip(track.resolved_path)
+                            if start_skip:
+                                beatgrid, cues = _shift_positions(
+                                    beatgrid, cues, -start_skip
+                                )
                         warnings.extend(f"track {tid}: {w}" for w in anlz_warnings)
                     except Exception as exc:  # noqa: BLE001 - skip+report, per policy
                         warnings.append(f"track {tid}: ANLZ unreadable: {exc}")
@@ -106,3 +113,28 @@ def read_library(
             on_progress("reading tracks", done, total)
 
     return dataclasses.replace(lib, tracks=tracks, warnings=warnings)
+
+
+def _shift_positions(
+    beatgrid: SourceBeatgrid | None,
+    cues: list[SourceCue],
+    samples: int,
+) -> tuple[SourceBeatgrid | None, list[SourceCue]]:
+    """Apply one signed sample offset to grids, cues, and loop endpoints."""
+    if beatgrid is not None:
+        beatgrid = dataclasses.replace(
+            beatgrid,
+            beats=[
+                dataclasses.replace(beat, sample_offset=beat.sample_offset + samples)
+                for beat in beatgrid.beats
+            ],
+        )
+    cues = [
+        dataclasses.replace(
+            cue,
+            start_sample=cue.start_sample + samples,
+            end_sample=(None if cue.end_sample is None else cue.end_sample + samples),
+        )
+        for cue in cues
+    ]
+    return beatgrid, cues
