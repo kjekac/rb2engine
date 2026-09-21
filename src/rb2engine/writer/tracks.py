@@ -224,7 +224,7 @@ def _insert_one_track(
             None,  # timeLastPlayed
             0,  # isPlayed
             file_type,
-            1,  # isAnalyzed — we write performance blobs
+            0,  # isAnalyzed — let Engine create the waveform data we do not write
             track.date_created,
             track.date_added,
             1,  # isAvailable
@@ -235,7 +235,7 @@ def _insert_one_track(
             int(getattr(track, "rb_id", 0) or 0),  # pdbImportKey: stable rb id when present
             None,  # streamingSource
             None,  # uri
-            0,  # isBeatGridLocked
+            1,  # isBeatGridLocked — preserve the imported grid during analysis
             None,  # originDatabaseUuid — trigger fills
             None,  # originTrackId — trigger fills
             0,  # streamingFlags
