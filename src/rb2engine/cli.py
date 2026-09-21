@@ -251,6 +251,25 @@ def _emit_report(
     help="Override JSON report path (default: Engine Library/rb2engine-report.json).",
 )
 @click.option("--no-artwork", is_flag=True, help="Skip album art extraction/writes.")
+@click.option(
+    "--prelude-bars",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Move unmarked A-D cues to E-H and generate this many bars of runway.",
+)
+@click.option(
+    "--prelude-minimum-gap-bars",
+    type=click.IntRange(min=0),
+    default=8,
+    show_default=True,
+    help="Consolidate generated preludes at most this many bars apart; 0 disables.",
+)
+@click.option(
+    "--prelude-playlist",
+    "prelude_playlists",
+    multiple=True,
+    help="Limit generation to this playlist path; repeat to select several.",
+)
 @click.pass_context
 def convert_cmd(
     ctx: click.Context,
@@ -261,23 +280,28 @@ def convert_cmd(
     target_schema: str | None,
     report_path: Path | None,
     no_artwork: bool,
+    prelude_bars: int | None,
+    prelude_minimum_gap_bars: int,
+    prelude_playlists: tuple[str, ...],
 ) -> None:
     """Convert a rekordbox USB export into an Engine Library on the same drive.
 
-    Reads PIONEER/export.pdb + USBANLZ, then writes Engine Library/Database2/m.db.
-    Music files are referenced where they already are — nothing is copied and
-    nothing outside Engine Library/ is written.
+    Reads PIONEER/rekordbox/export.pdb + PIONEER/USBANLZ/, then writes Engine
+    Library/Database2/m.db. Music files are referenced where they already are
+    — nothing is copied and nothing outside Engine Library/ is written.
 
     Exit codes: 0 clean, 1 converted with skips, 2 fatal (nothing usable written).
     """
     if drive is None:
         raise click.UsageError("DRIVE is required (the mount point of the stick)")
+    if prelude_bars is None and prelude_playlists:
+        raise click.UsageError("--prelude-playlist requires --prelude-bars")
 
     # Imported lazily so `--help` and `--version` stay fast and do not pull in
     # the parser/writer stack.
     import rb2engine.reader.library as reader_library
     from rb2engine.progress import ProgressReporter
-    from rb2engine.report import ConversionReport
+    from rb2engine.report import ConversionReport, render_prelude_issue_lines
     from rb2engine.writer.build import build_library
 
     schema: tuple[int, int, int] | None = None
@@ -312,12 +336,38 @@ def convert_cmd(
             on_progress=progress,
         )
 
+        prelude_config = None
+        if prelude_bars is not None:
+            from rb2engine.prelude import PreludeConfig, transform_library
+
+            prelude_config = PreludeConfig(
+                bars=prelude_bars,
+                minimum_gap_bars=prelude_minimum_gap_bars,
+                playlists=prelude_playlists,
+            )
+            try:
+                library, prelude_summary = transform_library(library, prelude_config)
+            except ValueError as exc:
+                raise click.UsageError(str(exc)) from exc
+            report.prelude = prelude_summary.to_json_obj()
+
         if dry_run:
             progress.close()
-            click.echo(
+            message = (
                 f"dry run: {len(library.tracks)} tracks, "
                 f"{len(library.playlists)} playlists — nothing written"
             )
+            if report.prelude is not None:
+                message += (
+                    f"; {report.prelude['preludes_created']} preludes, "
+                    f"{report.prelude['anchors_moved']} anchors, "
+                    f"{report.prelude['preludes_consolidated']} consolidated, "
+                    f"{len(report.prelude['issues'])} issues"
+                )
+            click.echo(message)
+            if report.prelude is not None:
+                for line in render_prelude_issue_lines(report.prelude):
+                    click.echo(line)
             ctx.exit(0)
 
         m_db = build_library(
@@ -355,7 +405,17 @@ def convert_cmd(
 
         try:
             journal = append_journal(
-                Path(drive) / ENGINE_LIBRARY_DIRNAME, report.provenance
+                Path(drive) / ENGINE_LIBRARY_DIRNAME,
+                report.provenance,
+                prelude_bars=(prelude_config.bars if prelude_config is not None else None),
+                prelude_minimum_gap_bars=(
+                    prelude_config.minimum_gap_bars
+                    if prelude_config is not None
+                    else None
+                ),
+                prelude_playlists=(
+                    prelude_config.playlists if prelude_config is not None else None
+                ),
             )
             click.echo(f"journal: {journal}")
         except OSError as exc:
@@ -391,9 +451,33 @@ def convert_cmd(
     help="Check only the first N tracks (a full library over USB is slow).",
 )
 @click.option("--no-artwork", is_flag=True, help="Skip artwork comparison.")
+@click.option(
+    "--prelude-bars",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Override recorded prelude length when constructing expected cues.",
+)
+@click.option(
+    "--prelude-minimum-gap-bars",
+    type=click.IntRange(min=0),
+    default=None,
+    help="Override the recorded minimum prelude spacing.",
+)
+@click.option(
+    "--prelude-playlist",
+    "prelude_playlists",
+    multiple=True,
+    help="Override the recorded playlist scope; repeat to select several.",
+)
 @click.pass_context
 def verify_cmd(
-    ctx: click.Context, drive: Path | None, sample: int | None, no_artwork: bool
+    ctx: click.Context,
+    drive: Path | None,
+    sample: int | None,
+    no_artwork: bool,
+    prelude_bars: int | None,
+    prelude_minimum_gap_bars: int | None,
+    prelude_playlists: tuple[str, ...],
 ) -> None:
     """Decode the written m.db and diff it against a fresh parse of the source.
 
@@ -413,8 +497,29 @@ def verify_cmd(
 
     from rb2engine.verify import verify_library
 
+    prelude_config = None
+    if prelude_bars is not None:
+        from rb2engine.prelude import PreludeConfig
+
+        prelude_config = PreludeConfig(
+            bars=prelude_bars,
+            minimum_gap_bars=(
+                8 if prelude_minimum_gap_bars is None else prelude_minimum_gap_bars
+            ),
+            playlists=prelude_playlists,
+        )
+    elif prelude_minimum_gap_bars is not None or prelude_playlists:
+        raise click.UsageError(
+            "prelude overrides require --prelude-bars when verifying"
+        )
+
     try:
-        result = verify_library(drive, with_artwork=not no_artwork, sample=sample)
+        result = verify_library(
+            drive,
+            with_artwork=not no_artwork,
+            sample=sample,
+            prelude_config=prelude_config,
+        )
     except (FatalError, UnsupportedFormatError) as exc:
         click.echo(f"cannot verify: {exc}", err=True)
         ctx.exit(2)

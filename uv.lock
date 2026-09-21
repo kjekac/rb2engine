@@ -741,8 +741,8 @@ wheels = [
 ]
 
 [[package]]
-name = "rb2engine"
-version = "0.5.0"
+name = "rb2engine-prelude"
+version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },

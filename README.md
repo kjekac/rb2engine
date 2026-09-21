@@ -1,241 +1,169 @@
-# rb2engine
+# rb2engine-prelude
 
-[![PyPI](https://img.shields.io/pypi/v/rb2engine)](https://pypi.org/project/rb2engine/)
-[![Downloads](https://static.pepy.tech/badge/rb2engine)](https://pepy.tech/project/rb2engine)
+`rb2engine-prelude` converts a Rekordbox USB export into an Engine DJ library
+on the same drive, then optionally turns Rekordbox hot cues into adjustable
+runway cues for Engine gear. It is a focused fork of
+[rb2engine](https://github.com/jrgutier/rb2engine), packaged with Nix for
+reproducible use on Linux and Apple Silicon macOS.
 
-Convert a **rekordbox** USB export into an **Engine DJ** library — on the same stick, in place, without duplicating a single audio file.
+The converter references the audio already exported by Rekordbox. It writes an
+Engine database under `Engine Library/`; it does not copy audio or alter
+`PIONEER/`, `Contents/`, or the Rekordbox database.
 
-Plug the result into Denon/Engine OS gear and your tracks, playlists, beatgrids, hot cues, loops and artwork are there. The Pioneer side keeps working exactly as before, because nothing on it is touched.
+## Prelude cues
+
+With `--prelude-bars 16`, each eligible point hot cue in A–D becomes an Engine
+anchor in E–H and gets a new cue 16 musical bars earlier:
+
+```text
+Rekordbox A at bar 64  ->  Engine E at bar 64 + Engine A at bar 48
+Rekordbox C at bar 96  ->  Engine G at bar 96 + Engine C at bar 80
+```
+
+The transform:
+
+- counts beats on Rekordbox's dense beatgrid, so tempo changes and variable
+  grids work correctly;
+- preserves the original anchor's exact sample position, colour, and name;
+- labels generated cues compactly, for example `16b:E` or
+  `16b:E (Drop), 24b:G`, and labels moved anchors with `[anchor:A]`;
+- shortens the runway at the beginning of a track to the largest available
+  whole-bar lead and records it, for example `6b:E`;
+- consolidates nearby generated preludes by default. If two would be eight bars
+  or less apart, the earlier one covers both anchors and its label names both;
+- leaves a source cue unchanged and reports an issue if its E–H destination is
+  occupied, it lacks a usable beatgrid, less than one full bar is available,
+  or the source pad is ambiguous;
+- leaves hot-cue loops and cues already carrying a prelude/anchor marker alone.
+
+The operation is idempotent in the useful sense: each conversion starts with
+the untouched Rekordbox export and rebuilds the Engine database. Re-run with
+`--prelude-bars 8`, `16`, or `32` to experiment without cumulative shifts.
+The transform itself also ignores its own markers if it is accidentally applied
+twice in memory.
+
+Set `--prelude-minimum-gap-bars 0` to keep every generated prelude. Any other
+value sets the maximum spacing at which the earlier prelude covers a later
+anchor.
+
+To affect only tracks in a Rekordbox playlist, pass its path from the playlist
+root. Repeat the option to take the union of several playlists; tracks present
+in more than one are transformed once:
 
 ```bash
-rb2engine convert /Volumes/MY_USB
+--prelude-playlist "Sets/Engine preludes" \
+--prelude-playlist "Moods/Heat Death Disco/Crates/120–126"
 ```
 
-## Why this exists
+A unique leaf name can be used by itself. If that name exists in several
+folders, the command reports the full paths and asks for an exact one. Without
+`--prelude-playlist`, cue generation applies to the whole library.
 
-Engine DJ can already import a rekordbox stick — but its export **copies your audio** into `Engine Library/Music/`. On a full stick that means a second copy of your whole library. A 44 GB library needs 44 GB free, and usually there isn't.
+## Prepare the drive
 
-rb2engine writes only a database. Your music stays exactly where rekordbox put it, and both systems index the same files:
+Export the library to a USB or other removable volume from Rekordbox. This tool
+needs the traditional Device Library files, including
+`PIONEER/rekordbox/export.pdb`; a OneLibrary-only export is not enough. Eject or
+close the drive in Rekordbox and Engine DJ before conversion.
 
+Keep a backup until the result has been tested on the target player. Conversion
+preserves Engine history and ancillary databases, but it rebuilds `m.db`, so
+edits made only in Engine are not a source of truth.
+
+## Run with Nix
+
+The flake is pinned and supports `x86_64-linux`, `aarch64-linux`, and
+`aarch64-darwin`. No system Python or `uv` installation is needed.
+
+From this checkout, first inspect the drive and preview the operation:
+
+```bash
+nix run . -- doctor /run/media/$USER/DJ_USB
+nix run . -- convert /run/media/$USER/DJ_USB \
+  --prelude-bars 16 \
+  --prelude-minimum-gap-bars 8 \
+  --prelude-playlist "Sets/Engine preludes" \
+  --dry-run
 ```
-USB STICK
-├── Contents/            ← your audio, untouched, referenced by BOTH
-├── PIONEER/             ← rekordbox's export, never modified
-└── Engine Library/
-    └── Database2/m.db   ← the only thing rb2engine writes
+
+Then build the Engine library and verify it against the Rekordbox source:
+
+```bash
+nix run . -- convert /run/media/$USER/DJ_USB \
+  --prelude-bars 16 \
+  --prelude-minimum-gap-bars 8 \
+  --prelude-playlist "Sets/Engine preludes"
+
+nix run . -- verify /run/media/$USER/DJ_USB
 ```
 
-Verified on a real 3,665-track library: **3,620 tracks, 47 playlists, ~500 MB of database** against a 44 GB library — instead of a second 44 GB.
+On macOS, use the mounted volume path such as `/Volumes/DJ_USB`. `verify`
+automatically reads the recorded prelude length and spacing from the conversion
+journal. Explicit `--prelude-bars` and `--prelude-minimum-gap-bars` options are
+available if the journal or report has been moved.
+
+Every conversion writes:
+
+- `Engine Library/Database2/m.db`, the Engine DJ database;
+- `Engine Library/rb2engine-report.json`, including cue counts, start-limited
+  cues, consolidations, and per-track issues;
+- `Engine Library/rb2engine-journal.jsonl`, an append-only conversion journal
+  used by verification.
+
+`--no-artwork` skips reading embedded artwork and makes conversion faster.
+`inspect --json` exposes the parsed Rekordbox library. `doctor` and `inspect`
+are read-only; `verify` reads both sides; only `convert` writes.
+Dry runs print every prelude issue with the artist, title, source pad, track ID,
+and reason. Completed conversions retain the same list in the JSON report.
+
+Exit status is `0` for success, `1` for a completed operation with discrepancies
+or skipped tracks, and `2` for a fatal error.
 
 ## What transfers
 
-| | |
-|---|---|
-| Tracks | title, artist, album, genre, label, comment, composer, remixer, year, track/disc number, BPM, key, rating, bitrate, length |
-| Playlists | full folder hierarchy and track order |
-| Beatgrids | including manually adjusted grids and tempo changes |
-| Hot cues | same pad numbers (A–H), with custom colours and names |
-| Memory cues | fill remaining pads in chronological order |
-| Saved loops | in/out points, into Engine's separate loop slots |
-| Album art | extracted from your files' embedded tags, deduplicated |
+- Track metadata, paths, keys, BPM, ratings, and other library fields
+- Playlist folder hierarchy and track order
+- Beatgrids, including manually adjusted grids and tempo changes
+- Hot cues, colours, names, memory cues, and saved loops
+- Embedded album art
 
-## Install
+Engine DJ cannot represent duplicate playlist names in one folder or the same
+track twice in one playlist. The converter deterministically renames duplicate
+playlist names and keeps the first duplicate track occurrence. Engine generates
+waveforms itself when it analyses a track.
 
-```bash
-pip install rb2engine
-```
-
-Requires Python 3.11+. Works on macOS, Windows and Linux.
-
-From source:
-
-```bash
-git clone https://github.com/jrgutier/rb2engine
-cd rb2engine
-uv sync
-uv run rb2engine --help
-```
-
-## Usage
-
-```bash
-# Check your setup and what's on a stick — always safe to run first
-rb2engine doctor /Volumes/MY_USB
-
-# Look at what rekordbox recorded — reads only, writes nothing
-rb2engine inspect /Volumes/MY_USB
-
-# Convert
-rb2engine convert /Volumes/MY_USB
-
-# Confirm the conversion is faithful, track by track
-rb2engine verify /Volumes/MY_USB
-
-
-
-# See what would happen without writing
-rb2engine convert /Volumes/MY_USB --dry-run
-
-# Skip artwork (much faster — artwork reads every audio file)
-rb2engine convert /Volumes/MY_USB --no-artwork
-```
-
-A conversion of a full stick takes minutes, so `convert` reports each phase as
-it goes:
-
-```
-reading tracks ▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱  30%
-```
-
-Progress goes to stderr and switches itself off when stderr is redirected or
-`--log-json` is set, so piping stays clean.
-
-### Commands
-
-| Command | Writes? | What it does |
-|---|---|---|
-| `convert` | **yes**, only inside `Engine Library/` | Builds the Engine library from the rekordbox export |
-| `inspect` | no | Dumps what rekordbox recorded — tracks, playlists, cues, grids. `--json` for machine output |
-| `verify` | no | Decodes the library you just wrote and diffs it against the source |
-| `doctor` | no | Versions, supported schemas, and a read of the drive |
-
-**Exit codes** (all commands): `0` all good · `1` finished with something worth
-your attention — tracks skipped on `convert`, discrepancies on `verify` · `2`
-fatal, nothing usable written.
-
-Every `convert` writes `Engine Library/rb2engine-report.json` listing what
-converted, what was skipped and why, and any dropped cues or loops.
-
-### Checking a conversion worked
-
-`verify` is the answer to "did that actually work?". Instead of opening Engine
-and spot-checking a few tracks, it decodes the `m.db` that was written and
-compares it against a fresh parse of the source — **at sample granularity**:
-
-- beatgrid marker positions
-- hot-cue pad number, position, ARGB colour and label
-- loop in/out points
-- track metadata and that each `path` resolves to a real file
-- playlist order, reconstructed from Engine's linked list
-- artwork counts
-
-```bash
-rb2engine verify /Volumes/MY_USB            # whole library
-rb2engine verify /Volumes/MY_USB --sample 50  # first 50 tracks (much faster over USB)
-```
-
-Exit `0` if everything matches, `1` if it finds discrepancies (each one listed
-with track, field, expected and actual), `2` if it could not verify at all.
-
-### When something looks wrong
-
-`doctor` first. It is read-only and tells you what rb2engine sees:
-
-```bash
-rb2engine doctor                      # versions and supported schemas
-rb2engine doctor /Volumes/MY_USB      # + what's actually on the drive
-rb2engine doctor --engine-db path/to/m.db   # is this schema supported?
-```
-
-It reports the tool and dependency versions, which Engine schemas are bundled,
-the drive layout, and — if the drive already has a library — its schema and
-UUID. An unsupported schema is named explicitly along with how to add it,
-rather than failing with a bare error. See
-[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
-
-### Options
-
-| Flag | Purpose |
-|---|---|
-| `--dry-run` | Parse and map, write nothing |
-| `--no-artwork` | Skip cover-art extraction |
-| `--target-schema 3.0.2` | Force an Engine schema version (see *Which schema gets written* below) |
-| `--database-uuid UUID` | Override the library UUID (default: reuse the existing one) |
-| `--report PATH` | Write the JSON report elsewhere |
-| `-v` / `-vv` | More logging · `--log-json` for machine-readable logs |
-
-## Safety
-
-rb2engine is built to be non-destructive, and the guarantee is tested rather than asserted:
-
-- **Only `Engine Library/` is ever written.** A test walks the entire drive before and after a conversion and fails if anything else changed. On the real 3,665-track stick, all 24,247 files outside `Engine Library/` were byte-identical afterwards, with both `.pdb` checksums unchanged.
-- **Your audio is never opened for writing.** Artwork extraction is read-only, and a test hashes source files before and after to prove it.
-- **The database swap is atomic** against process failure: the library is built elsewhere and moved into place with `os.replace`, so a crash leaves your previous `m.db` intact rather than a half-written one.
-- **Engine's own files survive.** `hm.db` (your play history), `sm.db`, `stm.db`, `Music/`, `Artwork/` and `OverviewData/` are preserved. The library UUID is carried forward so Engine's history stays linked.
-
-Still: **it's a DJ library. Back it up before you point a new tool at it.**
-
-## Things worth knowing
-
-**Re-running rebuilds from scratch.** The Engine library is derived data. Edits made *in Engine* to the converted library are not preserved — re-export from rekordbox, re-run, and you get a clean library.
-
-**Two rekordbox habits Engine can't represent.** Both are handled rather than fatal, and both appear in the report:
-
-- *Duplicate playlist names in one folder.* rekordbox allows it; Engine's schema doesn't. Duplicates get a numeric suffix (`Setlist (2)`), assigned deterministically so re-runs are stable.
-- *The same track twice in one playlist.* rekordbox allows it; Engine doesn't. The first occurrence is kept.
-
-**More than 8 cues on a track.** Engine has 8 pads. Hot cues keep their original pad; memory cues fill what's left chronologically; anything beyond 8 is dropped and itemised per-track in the report. Loops go to Engine's separate 8 loop slots, so a looped hot cue frees its pad.
-
-**Waveforms aren't generated.** Engine builds those itself when it analyses a track. Beatgrids, cues and loops are what has to survive the conversion, and they do.
-
-## Supported versions
-
-- **Engine DJ**: schema `3.0.1` and `3.0.2` (Engine DJ 4.x).
-- **rekordbox**: exports from rekordbox 5, 6 and 7.
-
-### Which schema gets written
-
-Never guessed from the app version — the same Engine build was observed running
-`3.0.1` on the desktop library and `3.0.2` on a USB stick. In precedence order:
-
-1. `--target-schema`, if you pass it
-2. **the schema already on the drive** — a `3.0.2` stick stays `3.0.2`
-3. your own Engine desktop library, if one is readable on this machine
-4. `3.0.1` as a conservative fallback
-
-The fallback is the *oldest* supported version on purpose. Engine migrates an
-older schema upward — a `3.0.1` stick was migrated in place to `3.0.2` by
-Engine DJ 4.3.0 — but there is no downgrade path, so writing the newest version
-to a fresh stick could hand an older Engine something it cannot open.
-
-If your stick uses a schema rb2engine doesn't know, it **refuses to write** and tells you, rather than producing a database Engine might silently misread. Adding a version is a schema capture plus one line — see `src/rb2engine/writer/ddl/README.md`.
-
-## How it works
-
-```
-export.pdb ────┐
-               ├─→ Source IR ─→ mapper ─→ Engine IR ─→ Engine Library/Database2/m.db
-ANLZ .DAT/.EXT ┘
-```
-
-- `reader/` parses `export.pdb` (DeviceSQL, via `construct`) and the ANLZ analysis files (beatgrids, cues, loops)
-- `ir.py` / `ir_engine.py` decouple the two sides — no rekordbox type reaches the writer, no Engine type reaches the reader
-- `mapper/` applies the semantics: key ordinals, cue-to-pad policy, beatgrid compression
-- `writer/` builds the SQLite database from schema DDL captured from Engine's own output
-
-Positions are integer sample counts throughout; the millisecond conversion happens exactly once, at the reader boundary.
+Supported Engine schemas are 3.0.1 and 3.0.2. Rekordbox Device Library exports
+from Rekordbox 5, 6, and 7 are supported. If an existing Engine database uses
+an unknown schema, conversion refuses to overwrite it.
 
 ## Development
 
-```bash
-uv sync
-uv run pytest          # ~680 tests
-uv run ruff check src/ tests/
-uv run mypy src/
-```
-
-Tests marked `real_stick` need an actual rekordbox USB mounted and are skipped otherwise:
+Enter the pinned environment and run the checks:
 
 ```bash
-uv run pytest -m real_stick
+nix develop
+pytest -q
+ruff check src tests
+mypy src/rb2engine
 ```
 
-The blob codecs are validated by **byte-identity against Engine's own output**: `encode(decode(blob)) == blob` for `beatData`, `quickCues`, `loops` and `trackData`, using a database Engine itself wrote. That check is what makes the encoders trustworthy.
+Or run the complete build gate directly:
 
-## License
+```bash
+nix flake check
+nix build
+./result/bin/rb2engine-prelude --help
+```
 
-MIT — see [LICENSE](LICENSE).
+The prelude transform is implemented as a pure Source IR transformation before
+rb2engine maps cues into Engine blobs. Its unit tests cover variable grids,
+start truncation, consolidation, collisions, and repeated application. The
+upstream conversion and binary-codec suite is retained.
 
-All runtime dependencies are permissively licensed (MIT / BSD). See [NOTICE](NOTICE) for attribution to [crate-digger](https://github.com/Deep-Symmetry/crate-digger) and [libdjinterop](https://github.com/xsco/libdjinterop), whose format documentation made this possible — neither is included or linked, and the Engine schema is captured from Engine's own databases.
+## Upstream and license
 
-rb2engine is an independent interoperability tool, unaffiliated with AlphaTheta/Pioneer DJ or inMusic/Denon DJ.
+This repository started from rb2engine 0.5.0, upstream commit `1602d73`. Keep
+the upstream remote under the name `upstream` when pulling future fixes.
+
+MIT; see [LICENSE](LICENSE). [NOTICE](NOTICE) contains the upstream format and
+dependency acknowledgements.
