@@ -260,6 +260,26 @@ def test_path_stored_verbatim_not_recomputed(conn: sqlite3.Connection) -> None:
     assert stored == PATH_VERBATIM
 
 
+def test_requests_waveform_analysis_without_replacing_beatgrid(
+    conn: sqlite3.Connection,
+) -> None:
+    """Engine should build its waveform while leaving the imported grid intact.
+
+    rb2engine writes beatData but deliberately leaves overviewWaveFormData
+    empty. Marking the track analyzed suppresses Engine's waveform pass;
+    leaving the grid unlocked lets that pass replace the converted grid.
+    """
+    insert_tracks(conn, [_make_track()])
+    conn.commit()
+
+    is_analyzed, is_beatgrid_locked = conn.execute(
+        "SELECT isAnalyzed, isBeatGridLocked FROM Track"
+    ).fetchone()
+
+    assert is_analyzed == 0
+    assert is_beatgrid_locked == 1
+
+
 def test_bpm_integer_and_bpm_analyzed_real_both_written(
     conn: sqlite3.Connection,
 ) -> None:
